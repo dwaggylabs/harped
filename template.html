@@ -32,16 +32,10 @@
 
     <div id="bark" class="hidden"></div>
 
-    <!-- Touch controls: d-pad (move/turn) + PERFORM. Drag anywhere on screen to look. -->
+    <!-- Touch controls (Minecraft-style): LEFT thumbstick moves; drag the rest of
+         the screen to look; PERFORM button holds the music. -->
     <div id="touch" class="hidden">
-      <div id="dpad">
-        <button class="dbtn" data-act="fwd">▲</button>
-        <div class="drow">
-          <button class="dbtn" data-act="left">↺</button>
-          <button class="dbtn" data-act="back">▼</button>
-          <button class="dbtn" data-act="right">↻</button>
-        </div>
-      </div>
+      <div id="joyBase"><div id="joyKnob"></div></div>
       <button id="playBtn">PERFORM<br><small>(hold)</small></button>
     </div>
 
@@ -69,8 +63,8 @@
         <p class="keys" data-desktop><strong>Move</strong> W/S · <strong>Turn</strong> A/D or ← → ·
           <strong>Strafe</strong> Q/E · <strong>Look</strong> click &amp; drag · grab the
           <span class="cyan">metronome</span> to slow the harp</p>
-        <p class="keys" data-touch><strong>Move/turn</strong> with the d-pad · <strong>Look</strong>
-          by dragging the screen · <strong>PERFORM</strong> button · grab the
+        <p class="keys" data-touch><strong>Move</strong> with the left stick · <strong>Look</strong>
+          by dragging the screen · <strong>PERFORM</strong> button (hold) · grab the
           <span class="cyan">metronome</span> to slow the harp</p>
       </div>
 

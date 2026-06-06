@@ -39,11 +39,11 @@ const MAZE_ROWS      = 7;
 const EXTRA_OPENINGS = 24;   // lots of loops so it's airy, not a dead-end trap
 
 // --- Render (brighter + see further) ---
-const RENDER_W = 640;
-const RENDER_H = 400;
+const RENDER_W = 800;        // crisper on iPad Pro; ~4:3 to match the screen
+const RENDER_H = 600;
 const FOV      = 0.66;
-const VIEW_FOG = 16;         // how far you can see (bigger = clearer)
-const AMBIENT  = 0.34;       // minimum light so distant walls never go pitch black
+const VIEW_FOG = 24;         // how far you can see (bigger = clearer)
+const AMBIENT  = 0.50;       // minimum light so the halls are always clearly visible
 
 // --- Player ---
 const MOVE_SPEED   = 3.0;
@@ -124,6 +124,8 @@ let lastTime = 0, clock = 0, barkTimer = 0, hintTimer = 0;
 let wasPlaying = false, outOfMedBarked = false;
 
 const keys = { fwd:false, back:false, left:false, right:false, strafeL:false, strafeR:false, play:false };
+// Analog movement from the on-screen joystick (Minecraft-style). -1..1 each.
+const tmove = { fwd:0, str:0 };
 
 /* ============================================================================
    MAZE GENERATION — recursive backtracker + extra loops.
@@ -224,19 +226,51 @@ function bfsNext(sx, sy, gx, gy) {
    AUDIO — Web Audio synth for tension/stings; Huw's recording is the <audio>.
    ============================================================================ */
 const Audio = {
-  ctx:null, droneOsc:null, droneGain:null,
+  ctx:null, droneOsc:null, droneGain:null, droneLp:null,
   init() {
     if (this.ctx) return;
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
+    // Tension "drone" is now a SOFT low pad (triangle through a low-pass), not the
+    // old buzzy sawtooth — warm dread instead of a wasp in a jar.
     this.droneOsc = this.ctx.createOscillator();
+    this.droneLp  = this.ctx.createBiquadFilter();
     this.droneGain = this.ctx.createGain();
-    this.droneOsc.type = 'sawtooth'; this.droneOsc.frequency.value = 55;
+    this.droneLp.type = 'lowpass'; this.droneLp.frequency.value = 420; this.droneLp.Q.value = 0.6;
+    this.droneOsc.type = 'triangle'; this.droneOsc.frequency.value = 98;
     this.droneGain.gain.value = 0;
-    this.droneOsc.connect(this.droneGain).connect(this.ctx.destination);
+    this.droneOsc.connect(this.droneLp).connect(this.droneGain).connect(this.ctx.destination);
     this.droneOsc.start();
   },
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
+  // A real plucked-harp voice: bright attack, ringing decay, stacked partials, and a
+  // low-pass that closes over the note — the timbre of a plucked string, not a beep.
+  harpPluck(freq=440, dur=1.4, vol=0.2) {
+    if (!this.ctx) return;
+    const t0 = this.ctx.currentTime;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.Q.value = 0.7;
+    lp.frequency.setValueAtTime(Math.min(7200, freq*8), t0);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(600, freq*2), t0 + dur);
+    lp.connect(this.ctx.destination);
+    const partials = [[1,1.0],[2,0.5],[3,0.28],[4,0.13]];
+    for (const [n, amp] of partials) {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = n === 1 ? 'triangle' : 'sine';
+      o.frequency.value = freq * n;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol*amp, t0 + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur*(1 - 0.1*(n-1)));
+      o.connect(g).connect(lp);
+      o.start(t0); o.stop(t0 + dur + 0.05);
+    }
+  },
+  // The harp idly arpeggiates as it hunts — a Db-major figure from the Fauré Impromptu.
+  _motif: [277.18, 349.23, 415.30, 554.37, 415.30, 349.23], _mi: 0,
+  harpHunt(vol) { this.harpPluck(this._motif[this._mi++ % this._motif.length], 1.3, vol); },
+  harpRoll(vol=0.18) { // a quick rising flourish (intro / accents)
+    [277.18,349.23,415.30,554.37,698.46].forEach((f,i)=>setTimeout(()=>this.harpPluck(f,1.2,vol), i*90));
+  },
   // Route Huw's recording through a GainNode. iOS Safari IGNORES <audio>.volume,
   // so the swell only works if we control gain via Web Audio. Call once, post-gesture.
   musicGain:null, mediaSrc:null,
@@ -256,8 +290,9 @@ const Audio = {
   },
   setProximity(t) {
     if (!this.ctx) return;
-    this.droneGain.gain.setTargetAtTime(Math.min(0.16, t*0.16), this.ctx.currentTime, 0.1);
-    this.droneOsc.frequency.setTargetAtTime(55 + t*45, this.ctx.currentTime, 0.1);
+    // Soft, low, and restrained — atmosphere, never a buzz.
+    this.droneGain.gain.setTargetAtTime(Math.min(0.06, t*0.06), this.ctx.currentTime, 0.15);
+    this.droneOsc.frequency.setTargetAtTime(92 + t*28, this.ctx.currentTime, 0.15);
   },
   silenceDrone() { if (this.ctx) this.droneGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2); },
   pluck(freq=330, dur=0.5, type='triangle', vol=0.22) {
@@ -271,7 +306,7 @@ const Audio = {
     o.connect(g).connect(this.ctx.destination);
     o.start(t0); o.stop(t0 + dur + 0.05);
   },
-  chime() { [659.25,783.99,987.77].forEach((f,i)=>setTimeout(()=>this.pluck(f,0.6,'sine',0.2), i*70)); },
+  chime() { [415.30,554.37,698.46,830.61].forEach((f,i)=>setTimeout(()=>this.harpPluck(f,1.1,0.2), i*80)); },
   tick()  { this.pluck(880,0.08,'square',0.16); setTimeout(()=>this.pluck(660,0.08,'square',0.14),120); },
   deathGliss() {
     if (!this.ctx) return;
@@ -282,7 +317,7 @@ const Audio = {
     g.gain.setValueAtTime(0.3,t0); g.gain.exponentialRampToValueAtTime(0.0001,t0+1.6);
     o.connect(g).connect(this.ctx.destination); o.start(t0); o.stop(t0+1.7);
   },
-  victoryArp() { [523.25,659.25,783.99,1046.5,1318.5].forEach((f,i)=>setTimeout(()=>this.pluck(f,0.7,'triangle',0.22), i*110)); },
+  victoryArp() { [277.18,349.23,415.30,554.37,698.46,830.61,1108.7].forEach((f,i)=>setTimeout(()=>this.harpPluck(f,1.4,0.22), i*100)); },
 };
 
 /* ============================================================================
@@ -451,6 +486,7 @@ function startGame() {
   try { performEl.currentTime = 0; } catch (e) {}
   Audio.setMusicVol(0); performEl.play().catch(()=>{});
   bark('A harp begins to play somewhere in the dark. It is, annoyingly, gorgeous.', 4);
+  Audio.harpRoll(0.16);
   lastTime = performance.now();
   requestAnimationFrame(loop);
 }
@@ -505,12 +541,14 @@ function update(dt) {
   lastDt = dt; clock += dt; harp.eye += dt*3;
   if (barkTimer > 0) { barkTimer -= dt; if (barkTimer <= 0) barkEl.classList.add('hidden'); }
 
-  // Turn & move
+  // Turn & move (keyboard turn keys; joystick gives analog move)
   if (keys.left)  rotate(-TURN_SPEED*dt);
   if (keys.right) rotate( TURN_SPEED*dt);
-  const fwd = (keys.fwd?1:0) - (keys.back?1:0);
-  const str = (keys.strafeR?1:0) - (keys.strafeL?1:0);
-  if (fwd || str) {
+  let fwd = (keys.fwd?1:0) - (keys.back?1:0) + tmove.fwd;
+  let str = (keys.strafeR?1:0) - (keys.strafeL?1:0) + tmove.str;
+  fwd = Math.max(-1, Math.min(1, fwd));
+  str = Math.max(-1, Math.min(1, str));
+  if (Math.abs(fwd) > 0.001 || Math.abs(str) > 0.001) {
     const mv = MOVE_SPEED*dt;
     const plen = Math.hypot(player.planeX, player.planeY) || 1;
     const sx = player.planeX/plen, sy = player.planeY/plen;
@@ -553,8 +591,8 @@ function update(dt) {
   const dist = Math.hypot(player.x-harp.x, player.y-harp.y);
   const prox = Math.max(0, 1 - dist/DANGER_DIST);
   Audio.setProximity(playing ? prox*0.4 : prox);
-  // the harp hums vain little arpeggios as it hunts (creepy-pretty)
-  if (!frozen && prox > 0.25 && ticked(1.1)) Audio.pluck(330 + rand(4)*110, 0.6, 'sine', 0.10*prox);
+  // the harp idly arpeggiates the Fauré as it hunts (creepy-pretty, properly harp-like)
+  if (!frozen && prox > 0.22 && ticked(1.0)) Audio.harpHunt(0.16*prox + 0.04);
 
   // Skaila hint barks (until you've met her)
   if (!skaila.taken) { hintTimer -= dt; if (hintTimer <= 0) { bark(pick(SKAILA_HINTS), 3.4); hintTimer = 12; } }
@@ -571,7 +609,7 @@ function update(dt) {
   }
   for (const a of artifacts) {
     if (!a.taken && cellDist(pcx,pcy,a.cx,a.cy) === 0) {
-      a.taken = true; memCollected++; Audio.pluck(880,0.5,'sine',0.18);
+      a.taken = true; memCollected++; Audio.harpPluck(880,1.1,0.2);
       memCountEl.textContent = `Mementos ${memCollected}/${artifacts.length}`;
       bark(a.title, 3.6);
     }
@@ -592,15 +630,34 @@ function update(dt) {
 function renderWorld() {
   const candle = 0.93 + 0.07*Math.sin(clock*9) + 0.03*Math.sin(clock*23);
 
-  // ceiling + floor
-  let g = ctx.createLinearGradient(0,0,0,RENDER_H/2);
-  g.addColorStop(0,'#0a0815'); g.addColorStop(1,'#1c1428');
-  ctx.fillStyle = g; ctx.fillRect(0,0,RENDER_W,RENDER_H/2);
-  g = ctx.createLinearGradient(0,RENDER_H/2,0,RENDER_H);
-  g.addColorStop(0,'#2c2030'); g.addColorStop(1,'#100b18');
-  ctx.fillStyle = g; ctx.fillRect(0,RENDER_H/2,RENDER_W,RENDER_H/2);
+  const HZ = RENDER_H/2;
+  // --- ceiling: a warm, dark vault with receding beams ---
+  let g = ctx.createLinearGradient(0,0,0,HZ);
+  g.addColorStop(0,'#160f1e'); g.addColorStop(1,'#2c2436');
+  ctx.fillStyle = g; ctx.fillRect(0,0,RENDER_W,HZ);
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1;
+  for (let i=1;i<=6;i++){ const yy = HZ - HZ*(i/6)*(i/6); ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(RENDER_W,yy); ctx.stroke(); }
+  // --- floor: warm parquet, receding floorboards ---
+  g = ctx.createLinearGradient(0,HZ,0,RENDER_H);
+  g.addColorStop(0,'#3c2e20'); g.addColorStop(1,'#1d140c');
+  ctx.fillStyle = g; ctx.fillRect(0,HZ,RENDER_W,HZ);
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  for (let i=1;i<=10;i++){ const yy = HZ + HZ*(i/10)*(i/10); ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(RENDER_W,yy); ctx.stroke(); }
+  // --- a crimson recital-hall runner down the centre ---
+  { const topW = RENDER_W*0.05, botW = RENDER_W*0.40, cxw = RENDER_W/2;
+    ctx.fillStyle = 'rgba(94,29,40,0.85)';
+    ctx.beginPath();
+    ctx.moveTo(cxw-topW/2,HZ); ctx.lineTo(cxw+topW/2,HZ);
+    ctx.lineTo(cxw+botW/2,RENDER_H); ctx.lineTo(cxw-botW/2,RENDER_H);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='rgba(233,198,107,0.4)'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(cxw-topW/2,HZ); ctx.lineTo(cxw-botW/2,RENDER_H);
+    ctx.moveTo(cxw+topW/2,HZ); ctx.lineTo(cxw+botW/2,RENDER_H);
+    ctx.stroke();
+  }
 
-  // walls
+  // --- walls: conservatoire panelling (DDA raycast, then painted in bands) ---
   for (let col=0; col<RENDER_W; col++) {
     const cameraX = 2*col/RENDER_W - 1;
     const rdx = player.dirX + player.planeX*cameraX;
@@ -619,14 +676,47 @@ function renderWorld() {
     }
     const perp = side===0 ? (sideX-ddx) : (sideY-ddy);
     zBuffer[col] = perp;
-    const lineH = Math.floor(RENDER_H/Math.max(perp,0.05));
-    let y0 = Math.floor(-lineH/2 + RENDER_H/2), y1 = Math.floor(lineH/2 + RENDER_H/2);
-    if (y0<0) y0=0; if (y1>RENDER_H) y1=RENDER_H;
+    const lineH = RENDER_H/Math.max(perp,0.05);
+    const top = HZ - lineH/2;                       // float top of the wall column
     const fog = Math.max(0,1 - perp/VIEW_FOG);
-    const base = side===1 ? 0.66 : 1.0;
-    const lit = Math.max(AMBIENT*base, fog*base) * candle;
-    ctx.fillStyle = `rgb(${Math.floor(158*lit)},${Math.floor(122*lit)},${Math.floor(70*lit)})`;
-    ctx.fillRect(col, y0, 1, y1-y0);
+    const lum = Math.min(1.05, Math.max(AMBIENT, fog) * candle) * (side===1 ? 0.74 : 1.0);
+
+    // hit coordinate along the wall (0..1) + a stable per-cell hash for features
+    let wx = side===0 ? (player.y + perp*rdy) : (player.x + perp*rdx);
+    wx -= Math.floor(wx);
+    const cellId = ((mapX*73856093) ^ (mapY*19349663)) >>> 0;
+
+    const paint = (fa,fb,r,gg,b) => {
+      let ya = top + fa*lineH, yb = top + fb*lineH;
+      if (yb<=0 || ya>=RENDER_H || yb<=ya) return;
+      if (ya<0) ya=0; if (yb>RENDER_H) yb=RENDER_H;
+      ctx.fillStyle = `rgb(${r*lum|0},${gg*lum|0},${b*lum|0})`;
+      ctx.fillRect(col, ya|0, 1, Math.ceil(yb-ya));
+    };
+
+    const pilaster = (wx < 0.06 || wx > 0.94);       // fluted column at each cell edge
+    if (pilaster) {
+      paint(0.00,1.00, 150,124,82);
+      paint(0.00,0.06, 206,176,118);                 // capital
+      paint(0.93,1.00, 66,46,28);                    // plinth
+    } else {
+      paint(0.00,0.05, 206,176,118);                 // crown moulding
+      paint(0.05,0.10, 150,128,92);                  // cornice shadow
+      paint(0.10,0.50, 196,178,146);                 // upper plaster
+      paint(0.50,0.54, 200,166,98);                  // picture rail
+      const seam = Math.abs(wx-0.25)<0.013 || Math.abs(wx-0.5)<0.013 || Math.abs(wx-0.75)<0.013;
+      paint(0.54,0.92, seam?80:122, seam?56:86, seam?34:52);   // walnut wainscot + seams
+      paint(0.92,1.00, 66,46,28);                    // baseboard
+      // a framed portrait on ~1/3 of cells…
+      if (cellId % 3 === 0 && wx>0.32 && wx<0.68) {
+        if (wx<0.346 || wx>0.654) paint(0.14,0.46, 196,162,96);   // gilt frame sides
+        else { paint(0.14,0.17, 196,162,96); paint(0.17,0.43, 54,42,52); paint(0.43,0.46, 196,162,96); }
+      }
+      // …a warm candle sconce on ~1/3 of the others
+      else if (cellId % 3 === 1 && Math.abs(wx-0.5)<0.018) {
+        paint(0.20,0.30, 255,206,128);
+      }
+    }
   }
 
   // sprites
@@ -716,7 +806,8 @@ document.addEventListener('mousemove', (e)=>{ if (state==='play' && document.poi
 const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 // CSS keys touch-only hints + the rotate nudge off this class; nothing set it before.
 if (isTouch) document.body.classList.add('is-touch');
-const ACT = { fwd:'fwd', back:'back', left:'left', right:'right' };
+
+// PERFORM button (press-and-hold).
 function bindHold(el, on, off) {
   const s=(e)=>{ e.preventDefault(); Audio.resume(); on(); };
   const f=(e)=>{ e.preventDefault(); off(); };
@@ -725,8 +816,66 @@ function bindHold(el, on, off) {
   el.addEventListener('touchcancel',f,{passive:false});
   el.addEventListener('mousedown',s); el.addEventListener('mouseup',f); el.addEventListener('mouseleave',f);
 }
-document.querySelectorAll('.dbtn').forEach((btn)=>{ const a=ACT[btn.dataset.act]; bindHold(btn, ()=>keys[a]=true, ()=>keys[a]=false); });
 bindHold(document.getElementById('playBtn'), ()=>keys.play=true, ()=>keys.play=false);
+
+/* Minecraft-style touch: a LEFT thumbstick moves/strafes; dragging anywhere else
+   looks (turns). Touches are tracked by identifier so you can move and look at the
+   same time. */
+const joyBase = document.getElementById('joyBase');
+const joyKnob = document.getElementById('joyKnob');
+const stageEl = document.getElementById('stage');
+const TOUCH_LOOK_SENS = 0.0052;
+let joyId = null, joyCX = 0, joyCY = 0, joyR = 60;
+let lookId = null, lookLastX = 0;
+
+function setJoy(cx, cy) {
+  let dx = cx - joyCX, dy = cy - joyCY;
+  const len = Math.hypot(dx, dy) || 1;
+  const cl = Math.min(len, joyR) / joyR;            // clamped 0..1 magnitude
+  const nx = dx/len, ny = dy/len;
+  tmove.str =  nx * cl;
+  tmove.fwd = -ny * cl;                             // pushing up = forward
+  const kpx = cl * (joyR - 34);                     // keep the knob inside the base
+  joyKnob.style.transform = `translate(${(nx*kpx)|0}px, ${(ny*kpx)|0}px)`;
+}
+function releaseJoy() { tmove.fwd = 0; tmove.str = 0; joyKnob.style.transform = 'translate(0px,0px)'; }
+function nearJoy(t) {
+  const r = joyBase.getBoundingClientRect();
+  if (t.clientX >= r.left-24 && t.clientX <= r.right+24 && t.clientY >= r.top-24 && t.clientY <= r.bottom+24) return r;
+  return null;
+}
+stageEl.addEventListener('touchstart', (e)=>{
+  Audio.resume();
+  for (const t of e.changedTouches) {
+    if (t.target && t.target.closest && t.target.closest('#playBtn')) continue; // button handles itself
+    const r = nearJoy(t);
+    if (r && joyId === null) {
+      joyId = t.identifier; joyCX = r.left + r.width/2; joyCY = r.top + r.height/2; joyR = r.width/2;
+      setJoy(t.clientX, t.clientY);
+    } else if (lookId === null) {
+      lookId = t.identifier; lookLastX = t.clientX;
+    }
+  }
+  if (state === 'play') e.preventDefault();
+}, {passive:false});
+stageEl.addEventListener('touchmove', (e)=>{
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyId) setJoy(t.clientX, t.clientY);
+    else if (t.identifier === lookId) {
+      if (state === 'play') rotate((t.clientX - lookLastX) * TOUCH_LOOK_SENS);
+      lookLastX = t.clientX;
+    }
+  }
+  if (state === 'play') e.preventDefault();
+}, {passive:false});
+function endTouches(e){
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyId) { joyId = null; releaseJoy(); }
+    else if (t.identifier === lookId) lookId = null;
+  }
+}
+stageEl.addEventListener('touchend', endTouches, {passive:false});
+stageEl.addEventListener('touchcancel', endTouches, {passive:false});
 
 /* ============================================================================
    INPUT — UI

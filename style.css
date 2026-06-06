@@ -144,13 +144,19 @@ body.is-touch [data-touch]   { display: block; }
   padding: 0 calc(22px + env(safe-area-inset-left)) 0 calc(22px + env(safe-area-inset-right));
 }
 #touch button { pointer-events: auto; }
-#dpad { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.drow { display: flex; gap: 8px; }
-.dbtn {
-  width: 74px; height: 74px; font-size: 28px; color: var(--gold);
-  background: rgba(20,13,28,0.66); border: 1px solid var(--gold-d); border-radius: 14px;
+/* Left thumbstick (move). The stage handles the touches; this is just the visual. */
+#joyBase {
+  position: relative; width: 150px; height: 150px; border-radius: 50%;
+  background: rgba(20,13,28,0.5); border: 2px solid rgba(233,198,107,0.45);
+  box-shadow: inset 0 0 26px rgba(0,0,0,0.55); pointer-events: none;
 }
-.dbtn:active { background: rgba(233,198,107,0.28); }
+#joyKnob {
+  position: absolute; left: 50%; top: 50%; width: 64px; height: 64px;
+  margin: -32px 0 0 -32px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, var(--gold), var(--gold-d));
+  border: 2px solid var(--gold); box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  transform: translate(0px,0px);
+}
 #playBtn {
   width: 128px; height: 128px; border-radius: 50%;
   font-family: inherit; font-size: 19px; letter-spacing: 1px; color: #07211f;
