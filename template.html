@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="HARPED" />
+  <meta name="theme-color" content="#0a0710" />
+  <title>HARPED — Midnight at the Conservatoire</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game"></canvas>
+
+    <!-- Huw Boucher's Fauré Impromptu — your weapon. Routed through Web Audio so
+         the volume swell works on iPad/iOS (Safari ignores <audio>.volume). -->
+    <audio id="perform" src="huw-faure-impromptu.wav" loop preload="auto" playsinline crossorigin="anonymous"></audio>
+
+    <div id="crosshair" class="hidden">✦</div>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <div id="medWrap" title="Propranolol — your performing nerve.">
+        <div id="medBar"></div>
+        <span class="meterLabel">PROPRANOLOL</span>
+      </div>
+      <div id="objective">Find Skaila Kanga for the tuning key, dear…</div>
+      <div id="memCount">Mementos 0/0</div>
+    </div>
+
+    <div id="bark" class="hidden"></div>
+
+    <!-- Touch controls: d-pad (move/turn) + PERFORM. Drag anywhere on screen to look. -->
+    <div id="touch" class="hidden">
+      <div id="dpad">
+        <button class="dbtn" data-act="fwd">▲</button>
+        <div class="drow">
+          <button class="dbtn" data-act="left">↺</button>
+          <button class="dbtn" data-act="back">▼</button>
+          <button class="dbtn" data-act="right">↻</button>
+        </div>
+      </div>
+      <button id="playBtn">PERFORM<br><small>(hold)</small></button>
+    </div>
+
+    <!-- Rotate-to-landscape nudge (portrait only) -->
+    <div id="rotate">🎵<br>Turn your iPad sideways<br><small>HARPED plays best in landscape</small></div>
+
+    <!-- ===================== OVERLAYS ===================== -->
+
+    <!-- Start -->
+    <div id="startScreen" class="screen">
+      <h1>HARPED</h1>
+      <p class="subtitle">Midnight at the Conservatoire. You stayed late to practise.
+        The Academy's prize gilded pedal harp — magnificent, temperamental,
+        <em>hopelessly vain</em> — has rolled out of the recital hall and is prowling
+        the practice-room corridors, hunting for an audience.</p>
+
+      <div class="howto">
+        <p><strong>The trick, dear:</strong> hold <strong>PERFORM</strong> (SPACE, or the
+          button) — Huw Boucher's <em>Fauré Impromptu</em> swells, and the vain harp
+          <em>freezes to listen</em>. It can't move while something that gorgeous plays.</p>
+        <p>Performing burns <span class="cyan">propranolol</span> (your nerve); rest to
+          refill. Find <span class="gold">Skaila Kanga</span> for the
+          <span class="gold">tuning key</span>, then reach the <span class="gold">recital-hall
+          door</span>. Wander the studios — there are <span class="rose">mementos</span> to find.</p>
+        <p class="keys" data-desktop><strong>Move</strong> W/S · <strong>Turn</strong> A/D or ← → ·
+          <strong>Strafe</strong> Q/E · <strong>Look</strong> click &amp; drag · grab the
+          <span class="cyan">metronome</span> to slow the harp</p>
+        <p class="keys" data-touch><strong>Move/turn</strong> with the d-pad · <strong>Look</strong>
+          by dragging the screen · <strong>PERFORM</strong> button · grab the
+          <span class="cyan">metronome</span> to slow the harp</p>
+      </div>
+
+      <p class="diffLabel">Choose your tempo (how scary):</p>
+      <div class="difficulty">
+        <button class="diff" data-diff="lullaby">Lullaby<br><small>just vibes</small></button>
+        <button class="diff selected" data-diff="pp">pp<br><small>gentle</small></button>
+        <button class="diff" data-diff="mf">mf<br><small>fair</small></button>
+        <button class="diff" data-diff="ff">ff<br><small>spicy</small></button>
+      </div>
+
+      <button id="startBtn" class="bigBtn">BEGIN THE RECITAL</button>
+    </div>
+
+    <!-- Win -->
+    <div id="winScreen" class="screen hidden">
+      <h1 class="winTitle">ENCORE!</h1>
+      <p id="winText" class="flavor"></p>
+      <button class="bigBtn restart">TAKE A BOW (again)</button>
+    </div>
+
+    <!-- Lose -->
+    <div id="loseScreen" class="screen hidden">
+      <h1 class="loseTitle">FORTISSIMO</h1>
+      <p id="loseText" class="flavor"></p>
+      <button class="bigBtn restart">REQUEST AN ENCORE</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
