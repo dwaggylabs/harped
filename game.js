@@ -79,7 +79,7 @@ const MUSIC_VOL   = 0.92;    // performing volume for Huw's recording
    ============================================================================ */
 const GW = MAZE_COLS * 2 + 1;
 const GH = MAZE_ROWS * 2 + 1;
-let map;
+let map, carpetDir;
 
 /* ============================================================================
    CANVAS + DOM
@@ -89,6 +89,7 @@ const ctx = canvas.getContext('2d');
 canvas.width = RENDER_W; canvas.height = RENDER_H;
 ctx.imageSmoothingEnabled = false;
 const zBuffer = new Float32Array(RENDER_W);
+let floorImg = null;            // reusable buffer for world-locked floor casting
 
 const hud         = document.getElementById('hud');
 const medBar      = document.getElementById('medBar');
@@ -163,6 +164,21 @@ function generateMaze() {
     const x = rand(GW), y = rand(GH);
     const isH = (x%2===0 && y%2===1), isV = (x%2===1 && y%2===0);
     if ((isH||isV) && map[y][x]===1 && x>0&&x<GW-1&&y>0&&y<GH-1) { map[y][x]=0; made++; }
+  }
+  computeCarpet();
+}
+
+// Per open cell, which way the carpet runner runs: 1 = N-S, 2 = E-W, 3 = junction
+// /room (cross), 0 = none. Lets the floor-caster lay continuous runners that follow
+// the corridors and turn corners — all world-locked.
+function computeCarpet() {
+  carpetDir = Array.from({ length: GH }, () => Array(GW).fill(0));
+  for (let y=0; y<GH; y++) for (let x=0; x<GW; x++) {
+    if (map[y][x] !== 0) continue;
+    const N = y>0 && map[y-1][x]===0, S = y<GH-1 && map[y+1][x]===0;
+    const E = x<GW-1 && map[y][x+1]===0, W = x>0 && map[y][x-1]===0;
+    const ns = N||S, ew = E||W;
+    carpetDir[y][x] = (ns&&ew) ? 3 : ns ? 1 : ew ? 2 : 0;
   }
 }
 
@@ -637,25 +653,44 @@ function renderWorld() {
   ctx.fillStyle = g; ctx.fillRect(0,0,RENDER_W,HZ);
   ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1;
   for (let i=1;i<=6;i++){ const yy = HZ - HZ*(i/6)*(i/6); ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(RENDER_W,yy); ctx.stroke(); }
-  // --- floor: warm parquet, receding floorboards ---
-  g = ctx.createLinearGradient(0,HZ,0,RENDER_H);
-  g.addColorStop(0,'#3c2e20'); g.addColorStop(1,'#1d140c');
-  ctx.fillStyle = g; ctx.fillRect(0,HZ,RENDER_W,HZ);
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-  for (let i=1;i<=10;i++){ const yy = HZ + HZ*(i/10)*(i/10); ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(RENDER_W,yy); ctx.stroke(); }
-  // --- a crimson recital-hall runner down the centre ---
-  { const topW = RENDER_W*0.05, botW = RENDER_W*0.40, cxw = RENDER_W/2;
-    ctx.fillStyle = 'rgba(94,29,40,0.85)';
-    ctx.beginPath();
-    ctx.moveTo(cxw-topW/2,HZ); ctx.lineTo(cxw+topW/2,HZ);
-    ctx.lineTo(cxw+botW/2,RENDER_H); ctx.lineTo(cxw-botW/2,RENDER_H);
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle='rgba(233,198,107,0.4)'; ctx.lineWidth=2;
-    ctx.beginPath();
-    ctx.moveTo(cxw-topW/2,HZ); ctx.lineTo(cxw-botW/2,RENDER_H);
-    ctx.moveTo(cxw+topW/2,HZ); ctx.lineTo(cxw+botW/2,RENDER_H);
-    ctx.stroke();
+  // --- floor: WORLD-LOCKED parquet + crimson carpet runners (true floor-casting,
+  //     so the carpet is part of the ground and stays put as you turn) ---
+  if (!floorImg) floorImg = ctx.createImageData(RENDER_W, RENDER_H - HZ);
+  const fdata = floorImg.data;
+  const posZ = 0.5 * RENDER_H;
+  const rdx0 = player.dirX - player.planeX, rdy0 = player.dirY - player.planeY;
+  const sxStep = (2*player.planeX) / RENDER_W, syStep = (2*player.planeY) / RENDER_W;
+  let o = 0;
+  for (let y = HZ; y < RENDER_H; y++) {
+    const denom = y - HZ; const rowDist = posZ / (denom <= 0 ? 1e-4 : denom);
+    let fx = player.x + rowDist * rdx0;
+    let fy = player.y + rowDist * rdy0;
+    const stepX = rowDist * sxStep, stepY = rowDist * syStep;
+    const sh = Math.max(AMBIENT, 1 - rowDist/VIEW_FOG) * candle;
+    for (let x = 0; x < RENDER_W; x++, fx += stepX, fy += stepY) {
+      const cx = Math.floor(fx), cy = Math.floor(fy);
+      const fracX = fx - cx, fracY = fy - cy;
+      let r, gg, b, carpet = false, gold = false;
+      if (cx>=0 && cy>=0 && cx<GW && cy<GH) {
+        const d = carpetDir[cy][cx];
+        const dxc = fracX - 0.5, dyc = fracY - 0.5;
+        const ax = dxc>-0.2 && dxc<0.2, ay = dyc>-0.2 && dyc<0.2;
+        carpet = d===1 ? ax : d===2 ? ay : d===3 ? (ax||ay) : (ax&&ay);
+        if (carpet) {                                  // gilt edge along the runner
+          if (d===1 || d===3) gold = Math.abs(Math.abs(dxc)-0.2) < 0.015;
+          if (!gold && (d===2 || d===3)) gold = Math.abs(Math.abs(dyc)-0.2) < 0.015;
+        }
+      }
+      if (gold)        { r=210; gg=176; b=104; }
+      else if (carpet) { r=122; gg=32;  b=44;  }
+      else {                                           // parquet boards
+        const board = (Math.floor(fx*2) + Math.floor(fy*2)) & 1;
+        if (board) { r=96; gg=70; b=44; } else { r=78; gg=56; b=36; }
+      }
+      fdata[o++] = r*sh; fdata[o++] = gg*sh; fdata[o++] = b*sh; fdata[o++] = 255;
+    }
   }
+  ctx.putImageData(floorImg, 0, HZ);
 
   // --- walls: conservatoire panelling (DDA raycast, then painted in bands) ---
   for (let col=0; col<RENDER_W; col++) {
